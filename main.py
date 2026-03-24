@@ -1,5 +1,6 @@
 from agent import ReActAgent
 
+# rules and few-shot examples for LLM
 SYSTEM_PROMPT = """
 You are a resilient ReAct agent.
 
@@ -135,6 +136,7 @@ Final Answer: The CEO is Alice Chen.
 
 
 def main():
+    # establish an agent
     agent = ReActAgent(
         system_prompt=SYSTEM_PROMPT,
         max_steps=5,
@@ -149,12 +151,13 @@ def main():
         "Who is the CEO of the startup 'Morphic' AI search?"
     ]
 
+    # Execute three questions in order
     for i, q in enumerate(questions, 1):
         print("\n" + "=" * 50)
         print(f"Task {i}")
         print(f"Question: {q}")
         print("=" * 50)
-
+        
         answer = agent.run(q)
         print("=" * 50)
 
