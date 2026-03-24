@@ -12,19 +12,29 @@ class ReActAgent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
         self.model = model
+        
+        # history: Stores the Thought / Action / Observation from each round.
+        # These will be fed back to the LLM as context for subsequent turns.
         self.history = []
+
+        # Record searched queries
+        # Avoid model searching repeat content
         self.searched_queries = []
 
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise ValueError("GROQ_API_KEY not found in .env")
 
+        # establish Groq client for calling LLM
         self.client = Groq(api_key=api_key)
 
     def build_messages(self, query: str):
+        # For each request sent to the LLM, start with the user's original query.
         conversation = [f"Question: {query}"]
         if self.history:
             conversation.extend(self.history)
+        
+        # Return the required messawge format to OpenAI/Groq chat
         return [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": "\n\n".join(conversation)},
@@ -104,11 +114,12 @@ class ReActAgent:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0,
-                stop=["\nObservation:"],
+                temperature=0,    # Minimize randomness to make the output more consistent.
+                stop=["\nObservation:"],    # Stop once the line Action: ... finished.
             )
         except Exception as e:
             error_text = str(e)
+            # Situation when the API is not available
             if "429" in error_text or "rate_limit" in error_text.lower():
                 return (
                     "Thought: I hit a rate limit and cannot continue searching right now.\n"
@@ -119,7 +130,10 @@ class ReActAgent:
                 f"Final Answer: I could not continue because of an API error: {error_text}"
             )
 
+        # Get the output content
         content = response.choices[0].message.content or ""
+        
+        # Extract the first valid block from the output to prevent malformed responses.
         return self.extract_first_valid_block(content)
 
     def parse_action(self, text: str):
@@ -181,6 +195,7 @@ class ReActAgent:
         )
 
     def run(self, query: str):
+        # Reset per question
         self.history = []
         self.searched_queries = []
 
@@ -190,15 +205,18 @@ class ReActAgent:
             llm_output = self.call_llm(query)
             print(llm_output)
 
+            # Check the output of LLM is Action or Final
             has_action = self.parse_action(llm_output) is not None
             has_final = self.parse_final_answer(llm_output) is not None
 
+            # Invalid format for having Action and Final answer
             if has_action and has_final:
                 observation = self.invalid_format_observation()
                 print(observation)
                 self.history.append(observation)
                 continue
 
+            # Invalid format for having multiple search
             if llm_output.count('Search["') > 1:
                 observation = self.invalid_format_observation()
                 print(observation)
@@ -206,6 +224,8 @@ class ReActAgent:
                 continue
 
             final_answer = self.parse_final_answer(llm_output)
+
+            # Check if it is real final answer
             if final_answer is not None:
                 if self.final_answer_is_incomplete(final_answer):
                     observation = (
@@ -218,9 +238,12 @@ class ReActAgent:
                     self.history.append(llm_output)
                     self.history.append(observation)
                     continue
+
+                # Real final answer
                 self.history.append(llm_output)
                 return final_answer
 
+            # Not final answer
             action_query = self.parse_action(llm_output)
             if action_query is None:
                 observation = self.invalid_format_observation()
@@ -230,6 +253,7 @@ class ReActAgent:
 
             self.history.append(llm_output)
 
+            # Avoid mmodel derectly searches for the arithmetic question
             if self.is_arithmetic_query(action_query):
                 observation = (
                     "Observation:\n"
@@ -239,6 +263,7 @@ class ReActAgent:
                 self.history.append(observation)
                 continue
 
+            # Avoid model searches for same query repeadly
             if self.is_near_duplicate_query(action_query):
                 observation = (
                     "Observation:\n"
